@@ -8,7 +8,7 @@ from openai import OpenAI
 from datetime import datetime, timedelta
 import time
 from email.utils import parsedate_to_datetime
-import markdown  # 新增：用于把大模型输出的 Markdown 转为 HTML
+import markdown
 
 # ==========================================
 # 1. 核心环境配置
@@ -23,22 +23,33 @@ client = OpenAI(
 )
 
 # ==========================================
-# 2. 信息源矩阵
+# 2. 信息源矩阵 (多源抓取)
 # ==========================================
+# 📢 [国内高质量技术源]
+# 注意：rsshub.app 是公共实例，有时会限流。如果失效，可替换为其他镜像。
 DOMESTIC_FEEDS = [
-    # 填你自己的国内技术源，建议单账号RSS
+    # CSDN：你之前关注的那个博主
+    "https://rsshub.app/csdn/blog/m0_64182150",
+    # 知乎：某个芯片/硬件相关的专栏 (示例ID，可替换为你喜欢的专栏)
+    "https://rsshub.app/zhihu/zhuanlan/270378436",
+    # 掘金：后端/架构分类
+    "https://rsshub.app/juejin/category/backend",
+    # 博客园：首页推荐
+    "http://feed.cnblogs.com/blog/sitehome/rss"
 ]
 
+# 📢 [海外硬核技术源]
 INTL_FEEDS = [
-    "https://www.anandtech.com/rss/",
-    "https://chipsandcheese.com/feed/"
+    "https://www.anandtech.com/rss/",                 # AnandTech (深度硬件评测)
+    "https://chipsandcheese.com/feed/",               # Chips and Cheese (硬核芯片架构分析)
+    "https://semiengineering.com/feed/"               # 半导体工程 (先进封装、架构)
 ]
 
 REPORT_TITLE = "📚 AI 硬件系统知识精讲"
 REPORT_SUBTITLE = "覆盖：PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL"
 
 # ==========================================
-# 3. 邮件发送函数 (升级为 HTML 渲染)
+# 3. 邮件发送函数 (HTML 渲染)
 # ==========================================
 def send_email(subject, md_content):
     mail_user = os.environ.get("MAIL_USER")
@@ -50,8 +61,9 @@ def send_email(subject, md_content):
         print("错误：邮箱配置不完整。")
         return
 
-    # 将 Markdown 转换为带格式的 HTML，并加上基础 CSS 美化
+    # Markdown 转 HTML
     html_body = markdown.markdown(md_content)
+    # 增加 CSS 样式，让邮件好看且支持图片自适应
     styled_html = f"""
     <html>
     <head>
@@ -74,7 +86,6 @@ def send_email(subject, md_content):
     msg["From"] = mail_user
     msg["To"] = mail_recipient
     msg["Subject"] = subject
-    # ⚠️ 使用 html 格式发送
     msg.attach(MIMEText(styled_html, "html", "utf-8"))
 
     try:
@@ -88,7 +99,7 @@ def send_email(subject, md_content):
 # ==========================================
 # 4. 抓取逻辑
 # ==========================================
-def fetch_recent_rss(feed_urls, days_limit=7):
+def fetch_recent_rss(feed_urls, days_limit=3):
     print(f"📡 正在扫描技术源，筛选过去 {days_limit} 天内的深度文章...")
     recent_items = []
     limit_date = datetime.now() - timedelta(days=days_limit)
@@ -125,13 +136,11 @@ def fetch_recent_rss(feed_urls, days_limit=7):
     return recent_items
 
 # ==========================================
-# 5. Jina 穿透抓取正文
+# 5. 穿透抓取正文
 # ==========================================
 def extract_full_text(url):
-    # 使用 Jina AI 获取网页的 Markdown 格式（包含图片语法）
     jina_url = f"https://r.jina.ai/{url}"
     try:
-        # 💡 这里加上 header，让 Jina 返回带图片的 Markdown
         headers = {"X-Return-Format": "markdown"}
         response = requests.get(jina_url, headers=headers, timeout=20)
         if response.status_code == 200:
@@ -143,10 +152,9 @@ def extract_full_text(url):
     return "抓取正文受限。"
 
 # ==========================================
-# 6. 核心 AI 引擎：要求保留图片格式
+# 6. AI 知识整理引擎
 # ==========================================
 def analyze_with_ai(title, content, source_name):
-    # 修改 Prompt，明确要求保留 Markdown 图片语法
     prompt = f"""
     你是一位资深的计算机体系结构与底层硬件专家。你的任务是将技术文章转化为系统性的学习笔记。
     请阅读这篇来自【{source_name}】的技术文章：
@@ -154,8 +162,7 @@ def analyze_with_ai(title, content, source_name):
     【正文】：{content}
     
     【判定准则】
-    如果内容与底层硬件、AI 算力架构、系统通信完全无关（如纯软件应用、社会新闻），请仅回复“无效资讯”。
-    如果有价值，请按以下“知识卡片”结构提取知识。
+    如果内容完全无关（如纯娱乐新闻、纯商业广告），请仅回复“无效资讯”。只要涉及硬件、软件架构、通信等技术话题，无论长短，请务必输出知识卡片。
 
     ⚠️【重要图片要求】
     如果原文中包含有价值的**流程图、芯片架构图、拓扑图**，请务必保留其 Markdown 图片语法 `![描述](图片URL)`，不要删除图片链接。
@@ -184,7 +191,7 @@ def analyze_with_ai(title, content, source_name):
         return "无效资讯"
 
 # ==========================================
-# 7. 流水线核心逻辑 (精简额度)
+# 7. 流水线控制
 # ==========================================
 def process_news_pipeline(news_list, section_title, limit=2):
     report_text = f"## {section_title}\n\n"
@@ -202,22 +209,24 @@ def process_news_pipeline(news_list, section_title, limit=2):
         
         if "无效资讯" not in analysis:
             valid_count += 1
-            # 用 html div 包裹一下，让邮件更好看
             report_text += f"<div class='card'>\n\n"
             report_text += f"### [{item['title']}]({item['url']})\n\n"
             report_text += f"{analysis}\n\n"
             report_text += f"</div>\n\n"
+        else:
+            print(f"❌ 被AI过滤: {item['title']}")
             
     if valid_count == 0:
         report_text += "> 🛡️ 本期未抓取到符合要求的系统性深度文章。\n\n"
     return report_text
 
 # ==========================================
-# 8. 执行与推送
+# 8. 执行入口
 # ==========================================
 if __name__ == "__main__":
     today_str = datetime.now().strftime("%Y-%m-%d")
     
+    # 抓取过去 3 天的文章
     raw_domestic = fetch_recent_rss(DOMESTIC_FEEDS, days_limit=3) 
     raw_intl = fetch_recent_rss(INTL_FEEDS, days_limit=3)
     
@@ -225,9 +234,9 @@ if __name__ == "__main__":
     final_report += f"**生成日期**：{today_str}\n\n"
     final_report += f"**知识体系**：{REPORT_SUBTITLE}\n\n---\n\n"
     
-    # 💡 严格控制：国内 2 篇，海外 1 篇。每天只消耗 6 个魔粒！
-    final_report += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=5)
-    final_report += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=0)
+    # 国内 2 篇，海外 1 篇，每天消耗 6 魔粒
+    final_report += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=2)
+    final_report += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1)
     
     email_subject = f"【每日技术精读】{today_str} - 底层架构知识"
     send_email(email_subject, final_report)

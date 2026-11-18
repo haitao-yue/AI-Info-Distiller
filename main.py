@@ -250,10 +250,10 @@ if __name__ == "__main__":
     final_html += f"<p><b>知识体系：</b>{REPORT_SUBTITLE}</p><hr>"
     
     # 国内 2 篇
-    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=2)
+    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=1)
     
     # 海外 1 篇
-    final_html += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1)
+   # final_html += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1)
     
     email_subject = f"【每日技术精读】{today_str} - 底层架构知识"
     send_email(email_subject, final_html)

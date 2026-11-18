@@ -1,3 +1,6 @@
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import os
 import requests
 import feedparser
@@ -9,39 +12,71 @@ from email.utils import parsedate_to_datetime
 # ==========================================
 # 1. 核心环境配置 (API 密钥)
 # ==========================================
-# 📢 [用户自定义区]：请确保你的运行环境或 GitHub Actions 中配置了这两个环境变量
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
+# 📢 [请确认 GitHub Secrets 已配置]：
+# DEEPSEEK_API_KEY (填入魔搭的 Token)
+# MAIL_USER (你的QQ邮箱)
+# MAIL_PASSWORD (QQ邮箱授权码)
+# MAIL_RECIPIENT (接收邮箱)
+# MAIL_SERVER (smtp.qq.com)
 
+API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+
+# ⚠️ 这里已改为魔搭社区的 Base URL
 client = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"
+    api_key=API_KEY,
+    base_url="https://api-inference.modelscope.cn/v1"
 )
 
 # ==========================================
-# 2. 终极信息源矩阵 (RSS 订阅源)
+# 2. 信息源矩阵 (RSS 订阅源)
 # ==========================================
-# 📢 [用户自定义区]：在这里填入你感兴趣的国内源（比如你本地部署的 WeRSS 链接，或独立博客 RSS）
+# 📢 这里填入你在 WeRSS 中获取的公众号聚合链接
 DOMESTIC_FEEDS = [
-    "http://124.223.40.126:8001/feed/all.rss" # 示例：本地微信公众号聚合源
+    "http://你的WeRSS公网IP:8001/feed/all.rss" # 请替换为你的真实 WeRSS 链接
 ]
 
-# 📢 [用户自定义区]：在这里填入你感兴趣的国际源（如科技、财经、AI、设计等领域的 RSS）
+# 国际源保留了技术类和学术类，为你提供全球视野
 INTL_FEEDS = [
-    "https://www.theverge.com/rss/index.xml",           # 示例：科技资讯 The Verge
-    "https://hnrss.org/frontpage",                      # 示例：极客论坛 Hacker News
-    "https://www.economist.com/finance-and-economics/rss.xml" # 示例：经济学人
+    "https://hnrss.org/frontpage",                      
+    "https://www.anandtech.com/rss/"
 ]
 
-# 📢 [用户自定义区]：自定义你的周报名称和你的专属身份/格言
-REPORT_TITLE = "🌍 专属【AI 洞察周报】"
-REPORT_SUBTITLE = "由 DeepSeek 强力驱动，为您过滤信息噪音，提炼高维认知。"
+# 📢 修改了报告标题
+REPORT_TITLE = "🧠 AI硬件每日知识汇总"
+REPORT_SUBTITLE = "覆盖：PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL"
 
 # ==========================================
-# 3. 抓取近期更新的 RSS 文章
+# 3. 邮件发送函数
 # ==========================================
-def fetch_recent_rss(feed_urls, days_limit=7):
-    # 📢 [用户自定义区]：默认抓取过去 7 天的内容，可修改 days_limit 参数
+def send_email(subject, content):
+    mail_user = os.environ.get("MAIL_USER")
+    mail_password = os.environ.get("MAIL_PASSWORD")
+    mail_recipient = os.environ.get("MAIL_RECIPIENT")
+    mail_server = os.environ.get("MAIL_SERVER", "smtp.qq.com")
+
+    if not all([mail_user, mail_password, mail_recipient]):
+        print("错误：邮箱配置不完整，请检查 GitHub Secrets。")
+        return
+
+    msg = MIMEMultipart()
+    msg["From"] = mail_user
+    msg["To"] = mail_recipient
+    msg["Subject"] = subject
+    # ⚠️ 这里使用 plain 纯文本格式，防止邮件里出现 Markdown 乱码符号
+    msg.attach(MIMEText(content, "plain", "utf-8"))
+
+    try:
+        with smtplib.SMTP_SSL(mail_server, 465) as server:
+            server.login(mail_user, mail_password)
+            server.sendmail(mail_user, mail_recipient, msg.as_string())
+        print("✅ 邮件发送成功！")
+    except Exception as e:
+        print(f"❌ 邮件发送失败：{e}")
+
+# ==========================================
+# 4. 抓取近期更新的 RSS 文章 (改为了 1 天)
+# ==========================================
+def fetch_recent_rss(feed_urls, days_limit=1):
     print(f"📡 正在扫描订阅源，严格筛选过去 {days_limit} 天内的文章...")
     recent_items = []
     limit_date = datetime.now() - timedelta(days=days_limit)
@@ -74,11 +109,11 @@ def fetch_recent_rss(feed_urls, days_limit=7):
             print(f"解析 {url} 失败: {e}")
             
     recent_items.sort(key=lambda x: x['pub_date'], reverse=True)
-    print(f"✅ 扫描完毕，共发现 {len(recent_items)} 篇新鲜文章。")
+    print(f"✅ 扫描完毕，共发现 {len(recent_items)} 篇 24 小时内的新鲜文章。")
     return recent_items
 
 # ==========================================
-# 4. Jina 穿透抓取正文 (用于非微信的外部网页)
+# 5. Jina 穿透抓取正文
 # ==========================================
 def extract_full_text(url):
     jina_url = f"https://r.jina.ai/{url}"
@@ -93,69 +128,70 @@ def extract_full_text(url):
     return "抓取正文受限，请基于标题和摘要进行研判。"
 
 # ==========================================
-# 5. DeepSeek 深度剖析 (核心 AI 引擎)
+# 6. 大模型深度剖析 (已改为魔搭模型 + 六大分类)
 # ==========================================
-def analyze_with_deepseek(title, content, source_name):
-    # 📢 [用户自定义区]：这是决定 AI 输出质量的灵魂 Prompt。你可以根据自己的需求调整语气和结构！
+def analyze_with_ai(title, content, source_name):
+    # ⚠️ 修改了 Prompt，强制 AI 进行门类划分
     prompt = f"""
-    你是一位资深的行业分析师与知识提炼专家，擅长从繁杂的资讯中过滤噪音，提取核心价值。
+    你是一位资深的 AI 硬件与底层架构专家。
     请审读这篇来自【{source_name}】的最新资讯：
     【标题】：{title}
     【正文/摘要】：{content}
     
     【判定准则】
-    1. 如果该内容完全是无营养的广告、纯软文、毫无逻辑的碎片信息，请仅回复“无效资讯”。
-    2. 如果内容具备一定的信息增量或阅读价值，请发挥你的专长，按以下结构输出结构化简报。
+    1. 如果该内容与 AI 硬件、底层架构完全无关（如纯消费电子产品、社会新闻），请仅回复“无效资讯”。
+    2. 如果有价值，请严格按以下结构输出纯文本简报（不要使用 Markdown 语法，用纯文字排版）：
 
-    【深度洞察产出】
-    📰 **1. 核心提要**：用 1-2 句话极简概括这篇资讯的核心事实（谁做了什么，发布了什么，或探讨了什么）。
-    🧠 **2. 深度洞察**：分析该事件或观点背后的底层逻辑、潜在影响或行业趋势（这件事为什么重要？说明了什么问题？）。
-    🎯 **3. 行动启发**：结合这篇资讯，给读者提供一个具体的思考角度或可以直接落地的行动建议。
+    【所属门类】：（必须从以下六个中选一个最贴切的：PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL）
+    【核心提要】：用 1-2 句话极简概括这篇资讯的核心事实。
+    【深度洞察】：分析该事件背后的底层逻辑、技术难点或行业趋势。
+    【行动启发】：给读者提供一个具体的思考角度或学习建议。
     """
     try:
+        # ⚠️ 这里替换为魔搭的模型名称
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-ai/DeepSeek-V4.1-Flash-1017", 
             messages=[
-                {"role": "system", "content": "你是一个能提供高信噪比信息摘要的顶级 AI 知识助理。"},
+                {"role": "system", "content": "你是一个专注 AI 硬件与底层架构的顶级知识助理。"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.4
         )
         return response.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        print(f"API调用出错: {e}")
         return "无效资讯"
 
 # ==========================================
-# 6. 流水线核心逻辑
+# 7. 流水线核心逻辑
 # ==========================================
 def process_news_pipeline(news_list, section_title, limit=None):
-    report_text = f"## {section_title}\n\n"
+    report_text = f"\n========================================\n{section_title}\n========================================\n\n"
     valid_count = 0
     
     for item in news_list:
-        # 📢 [用户自定义区]：控制每个版块最多输出多少篇文章，防止推送超载
         if limit is not None and valid_count >= limit:
             print(f"🛑 {section_title} 已达到 {limit} 篇上限，停止分析。")
             break
             
         print(f"🧐 评估文章: {item['title'][:30]}... (发布于 {item['pub_date'].strftime('%m-%d')})")
         full_text = extract_full_text(item['url'])
-        time.sleep(1.5) # 防止请求过频被封
+        time.sleep(1.5) 
         
-        analysis = analyze_with_deepseek(item['title'], full_text, item['source'])
+        analysis = analyze_with_ai(item['title'], full_text, item['source'])
         
         if "无效资讯" not in analysis:
             valid_count += 1
-            report_text += f"### {valid_count}. {item['title']}\n"
-            report_text += f"🔗 **原文直达**：[点击阅读全文]({item['url']})\n\n"
-            report_text += f"{analysis}\n\n---\n\n"
+            report_text += f"{valid_count}. {item['title']}\n"
+            report_text += f"原文链接：{item['url']}\n"
+            report_text += f"{analysis}\n\n----------------------------------------\n\n"
             
     if valid_count == 0:
-        report_text += "> 🛡️ *本周期内暂无符合价值研判标准的新鲜动态。*\n\n---\n\n"
+        report_text += "> 🛡️ 本周期内暂无符合价值研判标准的新鲜动态。\n\n----------------------------------------\n\n"
     return report_text
 
 # ==========================================
-# 7. 执行与微信推送
+# 8. 执行与邮件推送
 # ==========================================
 if __name__ == "__main__":
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -163,23 +199,15 @@ if __name__ == "__main__":
     raw_domestic = fetch_recent_rss(DOMESTIC_FEEDS)
     raw_intl = fetch_recent_rss(INTL_FEEDS)
     
-    # 构建报告头部
-    final_report = f"# {REPORT_TITLE}\n\n"
-    final_report += f"> 📅 **生成日期**：{today_str}\n"
-    final_report += f"> 💡 **订阅说明**：{REPORT_SUBTITLE}\n\n---\n\n"
+    final_report = f"{REPORT_TITLE}\n\n"
+    final_report += f"生成日期：{today_str}\n"
+    final_report += f"订阅说明：{REPORT_SUBTITLE}\n\n"
     
-    # 📢 [用户自定义区]：组装报告。这里设置国内最多 15 篇，国际最多 8 篇，可自行修改 limit。
-    final_report += process_news_pipeline(raw_domestic, "📌 第一部分：国内精选动态", limit=15)
-    final_report += process_news_pipeline(raw_intl, "🌐 第二部分：海外视野观察", limit=8)
+    # 国内最多 10 篇，国际最多 5 篇（因为每天更新，不需要太多，防止邮件太长）
+    final_report += process_news_pipeline(raw_domestic, "【国内精选动态】", limit=10)
+    final_report += process_news_pipeline(raw_intl, "【海外视野观察】", limit=5)
     
-    # 推送至微信 (使用 HTTPS 防止被拦截)
-    try:
-        requests.post("https://www.pushplus.plus/send", json={
-            "token": PUSHPLUS_TOKEN,
-            "title": f"【本周推送】{REPORT_TITLE} - {today_str}",
-            "content": final_report,
-            "template": "markdown"
-        }, timeout=15)
-        print("✅ 任务完成，周报已成功发送至微信！")
-    except Exception as e:
-        print(f"❌ 推送失败，请检查网络或 Token 配置: {e}")
+    # 调用发邮件函数
+    email_subject = f"【每日汇总】{today_str} - AI硬件系统知识"
+    send_email(email_subject, final_report)
+    print("🎉 每日汇总任务执行完毕！")

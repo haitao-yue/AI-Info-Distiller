@@ -236,7 +236,7 @@ if __name__ == "__main__":
     
     # 国内 2 篇，海外 1 篇，每天消耗 6 魔粒
     final_report += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=2)
-    final_report += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1)
+    final_report += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=0)
     
     email_subject = f"【每日技术精读】{today_str} - 底层架构知识"
     send_email(email_subject, final_report)

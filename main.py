@@ -20,9 +20,11 @@ from email.utils import parsedate_to_datetime
 # MAIL_SERVER (smtp.qq.com)
 
 API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-if not DEEPSEEK_API_KEY:
+
+# 修改这一行！
+if not API_KEY:
     raise ValueError("DEEPSEEK_API_KEY 环境变量为空，请检查 GitHub Secrets 和 daily.yml 的 env 配置")
-# ⚠️ 这里已改为魔搭社区的 Base URL
+
 client = OpenAI(
     api_key=API_KEY,
     base_url="https://api-inference.modelscope.cn/v1"

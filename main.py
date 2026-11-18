@@ -8,6 +8,7 @@ from openai import OpenAI
 from datetime import datetime, timedelta
 import time
 from email.utils import parsedate_to_datetime
+import re
 
 # ==========================================
 # 1. 核心环境配置
@@ -24,22 +25,23 @@ client = OpenAI(
 # ==========================================
 # 2. 信息源矩阵
 # ==========================================
-# 注意：建议你填入真正写硬件的公众号/CSDN专栏，这里用阮一峰和Chips保底测试
+# 📢 国内源 (可自己添加公众号 RSS)
 DOMESTIC_FEEDS = [
-    "https://rsshub.app/csdn/blog/m0_64182150", # 你之前关注的博主
-    "https://www.ruanyifeng.com/blog/atom.xml"  # 阮一峰（科技杂谈）
+    "https://rsshub.app/csdn/blog/m0_64182150", # CSDN博主
+    "https://www.ruanyifeng.com/blog/atom.xml"  # 阮一峰博客
 ]
 
+# 📢 海外源 (如果不想要，清空列表即可: INTL_FEEDS = [])
 INTL_FEEDS = [
-    "https://chipsandcheese.com/feed/",               # 芯片架构硬核分析
-    "https://semiengineering.com/feed/"               # 半导体工程
+    "https://chipsandcheese.com/feed/",
+    "https://semiengineering.com/feed/"
 ]
 
 REPORT_TITLE = "📚 AI 硬件系统知识精讲"
 REPORT_SUBTITLE = "覆盖：PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL"
 
 # ==========================================
-# 3. 邮件发送函数 (直接使用纯 HTML)
+# 3. 邮件发送函数
 # ==========================================
 def send_email(subject, html_content):
     mail_user = os.environ.get("MAIL_USER")
@@ -51,7 +53,6 @@ def send_email(subject, html_content):
         print("错误：邮箱配置不完整。")
         return
 
-    # 邮件外层框架和 CSS 样式
     styled_html = f"""
     <html>
     <head>
@@ -136,7 +137,6 @@ def fetch_recent_rss(feed_urls, days_limit=3):
 def extract_full_text(url):
     jina_url = f"https://r.jina.ai/{url}"
     try:
-        # 让 Jina 返回干净的 markdown，保留图片语法
         headers = {"X-Return-Format": "markdown"}
         response = requests.get(jina_url, headers=headers, timeout=20)
         if response.status_code == 200:
@@ -145,12 +145,12 @@ def extract_full_text(url):
                 return text[:6000]
     except Exception:
         pass
-    return "抓取正文受限。"
+    return ""
 
 # ==========================================
-# 6. AI 知识整理引擎 (强制输出 HTML)
+# 6. AI 知识整理引擎
 # ==========================================
-def analyze_with_ai(title, content, source_name):
+def analyze_with_ai(title, url, content, source_name):
     prompt = f"""
     你是一位资深的计算机体系结构与底层硬件专家。
     请阅读这篇来自【{source_name}】的技术文章：
@@ -159,11 +159,11 @@ def analyze_with_ai(title, content, source_name):
     
     【绝对判定准则】
     请严格判断：这篇文章是否包含关于 **PCIe、GPU互联(如NVLink)、通信库(NCCL等)、GPU芯片架构、PCIe Switch、CXL** 的实质性技术内容？
-    如果完全不涉及这些底层硬件领域（例如：纯应用软件开发、Excel操作、前端网页、普通AI模型应用），请**直接回复且仅回复“无效资讯”**，不要废话。
+    如果完全不涉及这些底层硬件领域（例如：纯应用软件开发、Excel操作、前端网页、普通AI模型应用），请**直接回复且仅回复“无效资讯”**。
     
     【输出格式要求】
-    如果你判定为有效，请**直接输出 HTML 代码片段**（不要使用 Markdown 的 ``` 或 ** 或 # 语法，一定要用 HTML 标签）。
-    必须严格按照以下 HTML 结构输出，不要增加额外的包装：
+    如果你判定为有效，请**直接输出 HTML 代码片段**（不要使用任何 Markdown 语法，不要用 ``` 包裹，直接输出纯 HTML）。
+    必须严格按照以下 HTML 结构输出：
 
     <h3>📖 {title}</h3>
     <p class="meta">🔗 原文链接：<a href="{url}" target="_blank">{url}</a></p>
@@ -173,15 +173,13 @@ def analyze_with_ai(title, content, source_name):
     <p><b>【核心概念】</b>：用一两段话解释文章涉及的核心技术点。</p>
     
     <p><b>【原理解析】</b>：详细拆解技术原理。
-    ⚠️ 若原文有架构图/流程图，请在合适的位置插入 HTML 图片标签：<img src="图片URL" alt="架构图"> (请从原文中提取真实的图片 URL)</p>
+    ⚠️ 若原文有架构图/流程图，请在合适的位置插入 HTML 图片标签：<img src="图片URL" alt="架构图"> (请从原文中提取真实的图片 URL，若无图片则不要输出 img 标签)</p>
     
     <p><b>【重点笔记】</b>：列出 2-3 个核心知识点。</p>
     <ul>
         <li>要点1</li>
         <li>要点2</li>
     </ul>
-    
-    ⚠️【禁止事项】：不要输出 `<html>`、`<body>`、`<code>` 标签，不要输出代码块。
     """
     try:
         response = client.chat.completions.create(
@@ -190,9 +188,15 @@ def analyze_with_ai(title, content, source_name):
                 {"role": "system", "content": "你是一个严谨的底层硬件架构师，只输出纯净的 HTML 技术笔记。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.2 # 降低温度，让它更严格遵守格式
+            temperature=0.2
         )
-        return response.choices[0].message.content.strip()
+        raw_result = response.choices[0].message.content.strip()
+        
+        # 💡 核心修复：暴力清洗 AI 可能不小心带出来的 Markdown 代码块符号
+        clean_html = re.sub(r'^```(html)?\s*', '', raw_result)
+        clean_html = re.sub(r'\s*```$', '', clean_html)
+        
+        return clean_html.strip()
     except Exception as e:
         print(f"API调用出错: {e}")
         return "无效资讯"
@@ -210,18 +214,23 @@ def process_news_pipeline(news_list, section_title, limit=2):
             
         print(f"🧐 评估文章: {item['title'][:30]}...")
         full_text = extract_full_text(item['url'])
+        
+        # 💡 核心修复：如果抓不到正文，直接跳过，不浪费 AI 额度
+        if not full_text:
+            print(f"⚠️ 抓取正文失败，跳过: {item['title']}")
+            continue
+            
         time.sleep(2) 
         
-        analysis = analyze_with_ai(item['title'], full_text, item['source'])
+        analysis = analyze_with_ai(item['title'], item['url'], full_text, item['source'])
         
-        # 只有 AI 返回了包含 <h3> 的 HTML 内容，才说明它判定有效
         if "无效资讯" not in analysis and "<h3>" in analysis:
             valid_count += 1
             report_text += f"<div class='card'>\n"
             report_text += analysis
             report_text += f"\n</div>\n"
         else:
-            print(f"❌ 被过滤(不符合硬件门类或格式错误): {item['title']}")
+            print(f"❌ 被过滤: {item['title']}")
             
     if valid_count == 0:
         report_text += "<div class='card'><p>🛡️ 本期暂无符合底层硬件门类的深度文章。</p></div>"
@@ -240,8 +249,10 @@ if __name__ == "__main__":
     final_html += f"<p><b>生成日期：</b>{today_str}</p>"
     final_html += f"<p><b>知识体系：</b>{REPORT_SUBTITLE}</p><hr>"
     
-    # 国内 2 篇，海外 1 篇
-    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=1)
+    # 国内 2 篇
+    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=2)
+    
+    # 海外 1 篇
     final_html += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1)
     
     email_subject = f"【每日技术精读】{today_str} - 底层架构知识"

@@ -23,6 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           # 安装代码里用到的库
           pip install requests feedparser openai
+          pip install requests feedparser openai markdown
 
       - name: Run script
         env:

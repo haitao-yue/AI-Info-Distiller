@@ -21,13 +21,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 安装代码里用到的库
-          pip install requests feedparser openai
           pip install requests feedparser openai markdown
 
       - name: Run script
         env:
-          # 把 GitHub Secrets 里的变量传给代码
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}

@@ -23,18 +23,11 @@ client = OpenAI(
 )
 
 # ==========================================
-# 2. 信息源矩阵
+# 2. 信息源矩阵 (仅保留国内源)
 # ==========================================
-# 📢 国内源 (可自己添加公众号 RSS)
 DOMESTIC_FEEDS = [
-    "https://rsshub.app/csdn/blog/m0_64182150", # CSDN博主
-    "https://www.ruanyifeng.com/blog/atom.xml"  # 阮一峰博客
-]
-
-# 📢 海外源 (如果不想要，清空列表即可: INTL_FEEDS = [])
-INTL_FEEDS = [
-    "https://chipsandcheese.com/feed/",
-    "https://semiengineering.com/feed/"
+    "https://rsshub.app/juejin/category/backend", # 掘金后端分类
+    "https://www.ruanyifeng.com/blog/atom.xml"    # 阮一峰博客
 ]
 
 REPORT_TITLE = "📚 AI 硬件系统知识精讲"
@@ -50,34 +43,20 @@ def send_email(subject, html_content):
     mail_server = os.environ.get("MAIL_SERVER", "smtp.qq.com")
 
     if not all([mail_user, mail_password, mail_recipient]):
-        print("错误：邮箱配置不完整。")
         return
 
     styled_html = f"""
-    <html>
-    <head>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }}
+    <html><head><style>
+        body {{ font-family: sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }}
         .container {{ background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
-        h1, h2 {{ color: #1a73e8; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; margin-top: 0; }}
+        h1, h2 {{ color: #1a73e8; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; }}
         h3 {{ color: #2c3e50; margin-top: 0; }}
-        .card {{ background: #ffffff; border: 1px solid #e0e0e0; border-left: 5px solid #1a73e8; border-radius: 6px; padding: 20px; margin-bottom: 25px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }}
-        img {{ max-width: 100%; height: auto; border-radius: 6px; margin: 10px 0; display: block; border: 1px solid #eee; }}
-        a {{ color: #1a73e8; text-decoration: none; font-weight: bold; }}
-        a:hover {{ text-decoration: underline; }}
+        .card {{ background: #ffffff; border: 1px solid #e0e0e0; border-left: 5px solid #1a73e8; border-radius: 6px; padding: 20px; margin-bottom: 25px; }}
+        img {{ max-width: 100%; height: auto; border-radius: 6px; margin: 10px 0; }}
+        a {{ color: #1a73e8; text-decoration: none; }}
         .meta {{ color: #888; font-size: 0.9em; margin-bottom: 15px; }}
-        ul {{ padding-left: 20px; }}
-        li {{ margin-bottom: 8px; }}
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            {html_content}
-        </div>
-    </body>
-    </html>
+    </style></head><body><div class="container">{html_content}</div></body></html>
     """
-
     msg = MIMEMultipart()
     msg["From"] = mail_user
     msg["To"] = mail_recipient
@@ -95,7 +74,7 @@ def send_email(subject, html_content):
 # ==========================================
 # 4. 抓取逻辑
 # ==========================================
-def fetch_recent_rss(feed_urls, days_limit=3):
+def fetch_recent_rss(feed_urls, days_limit=7):
     print(f"📡 正在扫描技术源...")
     recent_items = []
     limit_date = datetime.now() - timedelta(days=days_limit)
@@ -145,7 +124,7 @@ def extract_full_text(url):
                 return text[:6000]
     except Exception:
         pass
-    return ""
+    return "抓取正文受限，尝试直接根据标题概括。"
 
 # ==========================================
 # 6. AI 知识整理引擎
@@ -153,33 +132,21 @@ def extract_full_text(url):
 def analyze_with_ai(title, url, content, source_name):
     prompt = f"""
     你是一位资深的计算机体系结构与底层硬件专家。
-    请阅读这篇来自【{source_name}】的技术文章：
+    请阅读这篇技术文章：
     【标题】：{title}
     【正文】：{content}
     
     【绝对判定准则】
-    请严格判断：这篇文章是否包含关于 **PCIe、GPU互联(如NVLink)、通信库(NCCL等)、GPU芯片架构、PCIe Switch、CXL** 的实质性技术内容？
-    如果完全不涉及这些底层硬件领域（例如：纯应用软件开发、Excel操作、前端网页、普通AI模型应用），请**直接回复且仅回复“无效资讯”**。
+    如果完全不涉及底层硬件（如 PCIe, GPU, 芯片等），请**直接回复“无效资讯”**。
+    如果有价值，请**直接输出 HTML 代码片段**（不要用 Markdown，直接以 <h3> 开头）。
     
-    【输出格式要求】
-    如果你判定为有效，请**直接输出 HTML 代码片段**（不要使用任何 Markdown 语法，不要用 ``` 包裹，直接输出纯 HTML）。
-    必须严格按照以下 HTML 结构输出：
-
+    必须严格按以下 HTML 结构输出：
     <h3>📖 {title}</h3>
     <p class="meta">🔗 原文链接：<a href="{url}" target="_blank">{url}</a></p>
-    
     <p><b>【所属门类】</b>：从（PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL）中选一个。</p>
-    
-    <p><b>【核心概念】</b>：用一两段话解释文章涉及的核心技术点。</p>
-    
-    <p><b>【原理解析】</b>：详细拆解技术原理。
-    ⚠️ 若原文有架构图/流程图，请在合适的位置插入 HTML 图片标签：<img src="图片URL" alt="架构图"> (请从原文中提取真实的图片 URL，若无图片则不要输出 img 标签)</p>
-    
-    <p><b>【重点笔记】</b>：列出 2-3 个核心知识点。</p>
-    <ul>
-        <li>要点1</li>
-        <li>要点2</li>
-    </ul>
+    <p><b>【核心概念】</b>：一两段话解释技术点。</p>
+    <p><b>【原理解析】</b>：详细拆解。若有架构图，插入 <img src="图片URL">。</p>
+    <p><b>【重点笔记】</b>：</p><ul><li>要点1</li><li>要点2</li></ul>
     """
     try:
         response = client.chat.completions.create(
@@ -191,14 +158,11 @@ def analyze_with_ai(title, url, content, source_name):
             temperature=0.2
         )
         raw_result = response.choices[0].message.content.strip()
-        
-        # 💡 核心修复：暴力清洗 AI 可能不小心带出来的 Markdown 代码块符号
         clean_html = re.sub(r'^```(html)?\s*', '', raw_result)
         clean_html = re.sub(r'\s*```$', '', clean_html)
-        
         return clean_html.strip()
     except Exception as e:
-        print(f"API调用出错: {e}")
+        print(f"   ❌ API调用出错: {e}")
         return "无效资讯"
 
 # ==========================================
@@ -209,28 +173,22 @@ def process_news_pipeline(news_list, section_title, limit=2):
     valid_count = 0
     
     for item in news_list:
+        # 如果已经找够了 2 篇（limit=2），就停止
         if valid_count >= limit:
             break
             
         print(f"🧐 评估文章: {item['title'][:30]}...")
         full_text = extract_full_text(item['url'])
-        
-        # 💡 核心修复：如果抓不到正文，直接跳过，不浪费 AI 额度
-        if not full_text:
-            print(f"⚠️ 抓取正文失败，跳过: {item['title']}")
-            continue
-            
         time.sleep(2) 
         
         analysis = analyze_with_ai(item['title'], item['url'], full_text, item['source'])
         
         if "无效资讯" not in analysis and "<h3>" in analysis:
             valid_count += 1
-            report_text += f"<div class='card'>\n"
-            report_text += analysis
-            report_text += f"\n</div>\n"
+            report_text += f"<div class='card'>\n{analysis}\n</div>\n"
+            print(f"   ✅ 成功收录！")
         else:
-            print(f"❌ 被过滤: {item['title']}")
+            print(f"   ❌ 丢弃原因: AI判定不符合门类")
             
     if valid_count == 0:
         report_text += "<div class='card'><p>🛡️ 本期暂无符合底层硬件门类的深度文章。</p></div>"
@@ -242,18 +200,14 @@ def process_news_pipeline(news_list, section_title, limit=2):
 if __name__ == "__main__":
     today_str = datetime.now().strftime("%Y-%m-%d")
     
-    raw_domestic = fetch_recent_rss(DOMESTIC_FEEDS, days_limit=3) 
-    raw_intl = fetch_recent_rss(INTL_FEEDS, days_limit=3)
+    # 抓取过去 7 天的文章（放宽时间，保证有内容）
+    raw_domestic = fetch_recent_rss(DOMESTIC_FEEDS, days_limit=7) 
     
     final_html = f"<h1>{REPORT_TITLE}</h1>"
-    final_html += f"<p><b>生成日期：</b>{today_str}</p>"
-    final_html += f"<p><b>知识体系：</b>{REPORT_SUBTITLE}</p><hr>"
+    final_html += f"<p><b>生成日期：</b>{today_str}</p><hr>"
     
-    # 国内 2 篇
-    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=1)
-    
-    # 海外 1 篇
-   # final_html += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1)
+    # 👈 这里写死了 limit=2，不要改它！找够 2 篇就会停。
+    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=2)
     
     email_subject = f"【每日技术精读】{today_str} - 底层架构知识"
     send_email(email_subject, final_html)

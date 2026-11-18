@@ -8,7 +8,6 @@ from openai import OpenAI
 from datetime import datetime, timedelta
 import time
 from email.utils import parsedate_to_datetime
-import markdown
 
 # ==========================================
 # 1. 核心环境配置
@@ -23,35 +22,26 @@ client = OpenAI(
 )
 
 # ==========================================
-# 2. 信息源矩阵 (多源抓取)
+# 2. 信息源矩阵
 # ==========================================
-# 📢 [国内高质量技术源]
-# 注意：rsshub.app 是公共实例，有时会限流。如果失效，可替换为其他镜像。
+# 注意：建议你填入真正写硬件的公众号/CSDN专栏，这里用阮一峰和Chips保底测试
 DOMESTIC_FEEDS = [
-    # CSDN：你之前关注的那个博主
-    "https://rsshub.app/csdn/blog/m0_64182150",
-    # 知乎：某个芯片/硬件相关的专栏 (示例ID，可替换为你喜欢的专栏)
-    "https://rsshub.app/zhihu/zhuanlan/270378436",
-    # 掘金：后端/架构分类
-    "https://rsshub.app/juejin/category/backend",
-    # 博客园：首页推荐
-    "http://feed.cnblogs.com/blog/sitehome/rss"
+    "https://rsshub.app/csdn/blog/m0_64182150", # 你之前关注的博主
+    "https://www.ruanyifeng.com/blog/atom.xml"  # 阮一峰（科技杂谈）
 ]
 
-# 📢 [海外硬核技术源]
 INTL_FEEDS = [
-    "https://www.anandtech.com/rss/",                 # AnandTech (深度硬件评测)
-    "https://chipsandcheese.com/feed/",               # Chips and Cheese (硬核芯片架构分析)
-    "https://semiengineering.com/feed/"               # 半导体工程 (先进封装、架构)
+    "https://chipsandcheese.com/feed/",               # 芯片架构硬核分析
+    "https://semiengineering.com/feed/"               # 半导体工程
 ]
 
 REPORT_TITLE = "📚 AI 硬件系统知识精讲"
 REPORT_SUBTITLE = "覆盖：PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL"
 
 # ==========================================
-# 3. 邮件发送函数 (HTML 渲染)
+# 3. 邮件发送函数 (直接使用纯 HTML)
 # ==========================================
-def send_email(subject, md_content):
+def send_email(subject, html_content):
     mail_user = os.environ.get("MAIL_USER")
     mail_password = os.environ.get("MAIL_PASSWORD")
     mail_recipient = os.environ.get("MAIL_RECIPIENT")
@@ -61,23 +51,28 @@ def send_email(subject, md_content):
         print("错误：邮箱配置不完整。")
         return
 
-    # Markdown 转 HTML
-    html_body = markdown.markdown(md_content)
-    # 增加 CSS 样式，让邮件好看且支持图片自适应
+    # 邮件外层框架和 CSS 样式
     styled_html = f"""
     <html>
     <head>
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
-        h1, h2, h3 {{ color: #1a73e8; border-bottom: 1px solid #eee; padding-bottom: 5px; }}
-        img {{ max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; display: block; }}
-        blockquote {{ border-left: 4px solid #1a73e8; margin: 0; padding-left: 15px; color: #666; background: #f8f9fa; padding: 10px; }}
-        a {{ color: #1a73e8; text-decoration: none; }}
-        .card {{ background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }}
+        .container {{ background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        h1, h2 {{ color: #1a73e8; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; margin-top: 0; }}
+        h3 {{ color: #2c3e50; margin-top: 0; }}
+        .card {{ background: #ffffff; border: 1px solid #e0e0e0; border-left: 5px solid #1a73e8; border-radius: 6px; padding: 20px; margin-bottom: 25px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }}
+        img {{ max-width: 100%; height: auto; border-radius: 6px; margin: 10px 0; display: block; border: 1px solid #eee; }}
+        a {{ color: #1a73e8; text-decoration: none; font-weight: bold; }}
+        a:hover {{ text-decoration: underline; }}
+        .meta {{ color: #888; font-size: 0.9em; margin-bottom: 15px; }}
+        ul {{ padding-left: 20px; }}
+        li {{ margin-bottom: 8px; }}
     </style>
     </head>
     <body>
-    {html_body}
+        <div class="container">
+            {html_content}
+        </div>
     </body>
     </html>
     """
@@ -92,7 +87,7 @@ def send_email(subject, md_content):
         with smtplib.SMTP_SSL(mail_server, 465) as server:
             server.login(mail_user, mail_password)
             server.sendmail(mail_user, mail_recipient, msg.as_string())
-        print("✅ 图文邮件发送成功！")
+        print("✅ HTML邮件发送成功！")
     except Exception as e:
         print(f"❌ 邮件发送失败：{e}")
 
@@ -100,7 +95,7 @@ def send_email(subject, md_content):
 # 4. 抓取逻辑
 # ==========================================
 def fetch_recent_rss(feed_urls, days_limit=3):
-    print(f"📡 正在扫描技术源，筛选过去 {days_limit} 天内的深度文章...")
+    print(f"📡 正在扫描技术源...")
     recent_items = []
     limit_date = datetime.now() - timedelta(days=days_limit)
     
@@ -141,6 +136,7 @@ def fetch_recent_rss(feed_urls, days_limit=3):
 def extract_full_text(url):
     jina_url = f"https://r.jina.ai/{url}"
     try:
+        # 让 Jina 返回干净的 markdown，保留图片语法
         headers = {"X-Return-Format": "markdown"}
         response = requests.get(jina_url, headers=headers, timeout=20)
         if response.status_code == 200:
@@ -152,38 +148,49 @@ def extract_full_text(url):
     return "抓取正文受限。"
 
 # ==========================================
-# 6. AI 知识整理引擎
+# 6. AI 知识整理引擎 (强制输出 HTML)
 # ==========================================
 def analyze_with_ai(title, content, source_name):
     prompt = f"""
-    你是一位资深的计算机体系结构与底层硬件专家。你的任务是将技术文章转化为系统性的学习笔记。
+    你是一位资深的计算机体系结构与底层硬件专家。
     请阅读这篇来自【{source_name}】的技术文章：
     【标题】：{title}
     【正文】：{content}
     
-    【判定准则】
-    如果内容完全无关（如纯娱乐新闻、纯商业广告），请仅回复“无效资讯”。只要涉及硬件、软件架构、通信等技术话题，无论长短，请务必输出知识卡片。
+    【绝对判定准则】
+    请严格判断：这篇文章是否包含关于 **PCIe、GPU互联(如NVLink)、通信库(NCCL等)、GPU芯片架构、PCIe Switch、CXL** 的实质性技术内容？
+    如果完全不涉及这些底层硬件领域（例如：纯应用软件开发、Excel操作、前端网页、普通AI模型应用），请**直接回复且仅回复“无效资讯”**，不要废话。
+    
+    【输出格式要求】
+    如果你判定为有效，请**直接输出 HTML 代码片段**（不要使用 Markdown 的 ``` 或 ** 或 # 语法，一定要用 HTML 标签）。
+    必须严格按照以下 HTML 结构输出，不要增加额外的包装：
 
-    ⚠️【重要图片要求】
-    如果原文中包含有价值的**流程图、芯片架构图、拓扑图**，请务必保留其 Markdown 图片语法 `![描述](图片URL)`，不要删除图片链接。
-
-    【输出结构】
-    **【所属门类】**：（必须从以下六个中选一个：PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL）
+    <h3>📖 {title}</h3>
+    <p class="meta">🔗 原文链接：<a href="{url}" target="_blank">{url}</a></p>
     
-    **【核心概念】**：这篇文章主要解释了哪些核心概念或技术机制？
+    <p><b>【所属门类】</b>：从（PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL）中选一个。</p>
     
-    **【原理解析】**：用通俗严谨的语言解释原理。（如果原文有架构图，请把图片放在这里，并配上说明）
+    <p><b>【核心概念】</b>：用一两段话解释文章涉及的核心技术点。</p>
     
-    **【重点笔记】**：提炼 2-3 个最值得记住的关键细节或参数。
+    <p><b>【原理解析】</b>：详细拆解技术原理。
+    ⚠️ 若原文有架构图/流程图，请在合适的位置插入 HTML 图片标签：<img src="图片URL" alt="架构图"> (请从原文中提取真实的图片 URL)</p>
+    
+    <p><b>【重点笔记】</b>：列出 2-3 个核心知识点。</p>
+    <ul>
+        <li>要点1</li>
+        <li>要点2</li>
+    </ul>
+    
+    ⚠️【禁止事项】：不要输出 `<html>`、`<body>`、`<code>` 标签，不要输出代码块。
     """
     try:
         response = client.chat.completions.create(
             model="deepseek-ai/DeepSeek-V4.1-Flash-1017", 
             messages=[
-                {"role": "system", "content": "你是一个擅长将复杂技术拆解为结构化笔记的系统架构师，并能准确保留文档中的 Markdown 图片。"},
+                {"role": "system", "content": "你是一个严谨的底层硬件架构师，只输出纯净的 HTML 技术笔记。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3
+            temperature=0.2 # 降低温度，让它更严格遵守格式
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -194,7 +201,7 @@ def analyze_with_ai(title, content, source_name):
 # 7. 流水线控制
 # ==========================================
 def process_news_pipeline(news_list, section_title, limit=2):
-    report_text = f"## {section_title}\n\n"
+    report_text = f"<h2>{section_title}</h2>"
     valid_count = 0
     
     for item in news_list:
@@ -207,17 +214,17 @@ def process_news_pipeline(news_list, section_title, limit=2):
         
         analysis = analyze_with_ai(item['title'], full_text, item['source'])
         
-        if "无效资讯" not in analysis:
+        # 只有 AI 返回了包含 <h3> 的 HTML 内容，才说明它判定有效
+        if "无效资讯" not in analysis and "<h3>" in analysis:
             valid_count += 1
-            report_text += f"<div class='card'>\n\n"
-            report_text += f"### [{item['title']}]({item['url']})\n\n"
-            report_text += f"{analysis}\n\n"
-            report_text += f"</div>\n\n"
+            report_text += f"<div class='card'>\n"
+            report_text += analysis
+            report_text += f"\n</div>\n"
         else:
-            print(f"❌ 被AI过滤: {item['title']}")
+            print(f"❌ 被过滤(不符合硬件门类或格式错误): {item['title']}")
             
     if valid_count == 0:
-        report_text += "> 🛡️ 本期未抓取到符合要求的系统性深度文章。\n\n"
+        report_text += "<div class='card'><p>🛡️ 本期暂无符合底层硬件门类的深度文章。</p></div>"
     return report_text
 
 # ==========================================
@@ -226,18 +233,17 @@ def process_news_pipeline(news_list, section_title, limit=2):
 if __name__ == "__main__":
     today_str = datetime.now().strftime("%Y-%m-%d")
     
-    # 抓取过去 3 天的文章
     raw_domestic = fetch_recent_rss(DOMESTIC_FEEDS, days_limit=3) 
     raw_intl = fetch_recent_rss(INTL_FEEDS, days_limit=3)
     
-    final_report = f"# {REPORT_TITLE}\n\n"
-    final_report += f"**生成日期**：{today_str}\n\n"
-    final_report += f"**知识体系**：{REPORT_SUBTITLE}\n\n---\n\n"
+    final_html = f"<h1>{REPORT_TITLE}</h1>"
+    final_html += f"<p><b>生成日期：</b>{today_str}</p>"
+    final_html += f"<p><b>知识体系：</b>{REPORT_SUBTITLE}</p><hr>"
     
-    # 国内 2 篇，海外 1 篇，每天消耗 6 魔粒
-    final_report += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=2)
-    final_report += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=0)
+    # 国内 2 篇，海外 1 篇
+    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=1)
+    final_html += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1)
     
     email_subject = f"【每日技术精读】{today_str} - 底层架构知识"
-    send_email(email_subject, final_report)
+    send_email(email_subject, final_html)
     print("🎉 每日学习任务执行完毕！")

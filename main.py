@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import time
 from email.utils import parsedate_to_datetime
 import re
+import json
 
 # ==========================================
 # 1. 核心环境配置
@@ -26,26 +27,48 @@ client = OpenAI(
 # 2. 超强信息源矩阵
 # ==========================================
 DOMESTIC_FEEDS = [
-    "https://rsshub.app/csdn/blog/sailing_w",         # 王齐 (Sailing_W)
-    "https://rsshub.app/csdn/blog/m0_64182150",       # 你找的 CSDN 博主
-    "https://www.infoq.cn/feed",                      # InfoQ 中文
-    "https://rsshub.app/juejin/category/architecture",# 掘金架构
-    "https://www.ruanyifeng.com/blog/atom.xml"        # 阮一峰
+    "https://rsshub.app/csdn/blog/sailing_w",
+    "https://rsshub.app/csdn/blog/m0_64182150",
+    "https://www.infoq.cn/feed",
+    "https://rsshub.app/juejin/category/architecture",
+    "https://www.ruanyifeng.com/blog/atom.xml"
 ]
 
 INTL_FEEDS = [
-    "https://chipsandcheese.com/feed/",               # Chips and Cheese
-    "https://semiengineering.com/feed/",              # 半导体工程
-    "https://www.anandtech.com/rss/",                 # AnandTech
-    "https://www.tomshardware.com/feeds/all",         # Tom's Hardware
-    "https://www.techpowerup.com/rss/news"            # TechPowerUp
+    "https://chipsandcheese.com/feed/",
+    "https://semiengineering.com/feed/",
+    "https://www.anandtech.com/rss/",
+    "https://www.tomshardware.com/feeds/all",
+    "https://www.techpowerup.com/rss/news"
 ]
 
 REPORT_TITLE = "📚 AI 硬件系统知识精讲"
 REPORT_SUBTITLE = "覆盖：PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL"
 
 # ==========================================
-# 3. 邮件发送函数
+# 3. 历史记录读写模块 (防重复核心)
+# ==========================================
+HISTORY_FILE = "history.json"
+
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+        except:
+            return set()
+    return set()
+
+def save_history(new_urls):
+    history = load_history()
+    history.update(new_urls)
+    # 为了不让文件无限膨胀，只保留最近的 1000 条记录
+    history_list = list(history)[-1000:] 
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history_list, f, ensure_ascii=False, indent=2)
+
+# ==========================================
+# 4. 邮件发送函数
 # ==========================================
 def send_email(subject, html_content):
     mail_user = os.environ.get("MAIL_USER")
@@ -83,45 +106,39 @@ def send_email(subject, html_content):
         print(f"❌ 邮件发送失败：{e}")
 
 # ==========================================
-# 4. 抓取逻辑
+# 5. 抓取逻辑 (去掉了时间限制，直接拉取最新)
 # ==========================================
-def fetch_recent_rss(feed_urls, days_limit=7):
-    print(f"📡 正在扫描技术源...")
+def fetch_unread_rss(feed_urls, history_urls):
+    print(f"📡 正在扫描技术源（忽略已发过的文章）...")
     recent_items = []
-    limit_date = datetime.now() - timedelta(days=days_limit)
     
     for url in feed_urls:
         try:
             feed = feedparser.parse(url)
             source_name = feed.feed.title if hasattr(feed.feed, 'title') else "技术专栏"
-            for entry in feed.entries:
-                try:
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        pub_date = datetime(*entry.published_parsed[:6])
-                    elif hasattr(entry, 'published'):
-                        pub_date = parsedate_to_datetime(entry.published).replace(tzinfo=None)
-                    else:
-                        continue
-                        
-                    if pub_date >= limit_date:
-                        recent_items.append({
-                            "title": entry.title,
-                            "url": entry.link,
-                            "summary": entry.get("summary", ""),
-                            "source": source_name,
-                            "pub_date": pub_date
-                        })
-                except Exception:
-                    pass
+            
+            # 每个源只看最新的 10 篇，防止历史积压太多
+            for entry in feed.entries[:10]:
+                if entry.link in history_urls:
+                    continue # 如果在历史记录里，直接跳过
+                
+                recent_items.append({
+                    "title": entry.title,
+                    "url": entry.link,
+                    "source": source_name,
+                    "pub_date": datetime.now() # 统一给个当前时间用于排序
+                })
         except Exception as e:
             print(f"解析 {url} 失败: {e}")
             
-    recent_items.sort(key=lambda x: x['pub_date'], reverse=True)
-    print(f"✅ 扫描完毕，共发现 {len(recent_items)} 篇待解析文章。")
+    # 为了防止总是优先看某一个源，把所有源打乱
+    import random
+    random.shuffle(recent_items)
+    print(f"✅ 扫描完毕，共发现 {len(recent_items)} 篇从未发过的新文章。")
     return recent_items
 
 # ==========================================
-# 5. 穿透抓取正文
+# 6. 穿透抓取正文
 # ==========================================
 def extract_full_text(url):
     jina_url = f"https://r.jina.ai/{url}"
@@ -137,7 +154,7 @@ def extract_full_text(url):
     return ""
 
 # ==========================================
-# 6. AI 知识整理引擎
+# 7. AI 知识整理引擎 (大幅放宽判定条件)
 # ==========================================
 def analyze_with_ai(title, url, content, source_name):
     prompt = f"""
@@ -147,14 +164,14 @@ def analyze_with_ai(title, url, content, source_name):
     【正文】：{content}
     
     【绝对判定准则】
-    只要文章涉及以下任何领域（PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL / 半导体架构 / 芯片封装），请务必输出卡片。
-    如果文章是纯软件应用开发、新闻八卦、社会资讯，请直接回复“无效资讯”。
-
+    只要文章涉及以下任何领域（PCIe / GPU / 通信网络 / 芯片架构 / 半导体 / 服务器系统），**哪怕只是沾边或基础概念**，都请**务必输出卡片**。
+    只有当文章是纯前端开发、纯后端业务逻辑、社会新闻、娱乐八卦时，才回复“无效资讯”。
+    
     【输出格式要求】
     请**直接输出 HTML 代码片段**（不要用 ``` 包裹，直接以 <h3> 开头）。
     <h3>📖 {title}</h3>
     <p class="meta">🔗 原文链接：<a href="{url}" target="_blank">{url}</a></p>
-    <p><b>【所属门类】</b>：从（PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL）中选一个。</p>
+    <p><b>【所属门类】</b>：从（PCIe / GPU互联 / 通信库 / GPU芯片 / PCIe Switch / CXL / 其他硬件）中选一个。</p>
     <p><b>【核心概念】</b>：用一两段话解释文章涉及的核心技术点。</p>
     <p><b>【原理解析】</b>：详细拆解技术原理。若有图，插入 <img src="图片URL">。</p>
     <p><b>【重点笔记】</b>：</p><ul><li>要点1</li><li>要点2</li></ul>
@@ -177,16 +194,15 @@ def analyze_with_ai(title, url, content, source_name):
         return "无效资讯"
 
 # ==========================================
-# 7. 流水线控制（已加入防超额机制）
+# 8. 流水线控制
 # ==========================================
-# 👇 这里的 max_evaluate 就是“最多尝试评估几篇文章”，防止扣费超支
-def process_news_pipeline(news_list, section_title, limit=2, max_evaluate=4):
+def process_news_pipeline(news_list, section_title, limit=2, max_evaluate=10):
     report_text = f"<h2>{section_title}</h2>"
     valid_count = 0
-    evaluated_count = 0  # 记录已经调用了多少次 AI
+    evaluated_count = 0
+    success_urls = [] # 记录今天成功发了哪些链接
     
     for item in news_list:
-        # 如果已经找够了想要的文章，或者评估次数达到了上限，立刻停止
         if valid_count >= limit or evaluated_count >= max_evaluate:
             break
             
@@ -194,39 +210,53 @@ def process_news_pipeline(news_list, section_title, limit=2, max_evaluate=4):
         full_text = extract_full_text(item['url'])
         
         if not full_text:
-            print(f"   ⚠️ 丢弃原因: 抓取正文失败或正文太短")
+            print(f"   ⚠️ 丢弃原因: 抓取正文失败")
             continue
             
-        evaluated_count += 1 # 准备调用 AI，计数 +1
-        time.sleep(2) 
+        evaluated_count += 1 
+        time.sleep(1) 
         analysis = analyze_with_ai(item['title'], item['url'], full_text, item['source'])
         
         if "无效资讯" not in analysis and "<h3>" in analysis:
             valid_count += 1
+            success_urls.append(item['url']) # 记录成功的URL
             report_text += f"<div class='card'>\n{analysis}\n</div>\n"
             print(f"   ✅ 成功收录！")
         else:
-            print(f"   ❌ 丢弃原因: AI判定不符合门类")
+            print(f"   ❌ 丢弃: 纯软件或新闻")
             
     if valid_count == 0:
-        report_text += "<div class='card'><p>🛡️ 本期暂无符合底层硬件门类的深度文章。</p></div>"
-    return report_text
+        report_text += "<div class='card'><p>🛡️ 本期暂无符合门类的文章。</p></div>"
+    return report_text, success_urls
 
 # ==========================================
-# 8. 执行入口
+# 9. 执行入口
 # ==========================================
 if __name__ == "__main__":
     today_str = datetime.now().strftime("%Y-%m-%d")
     
-    raw_domestic = fetch_recent_rss(DOMESTIC_FEEDS, days_limit=7) 
-    raw_intl = fetch_recent_rss(INTL_FEEDS, days_limit=7)
+    # 加载历史记录
+    history_urls = load_history()
+    
+    # 抓取未读文章 (每个源最多拉10篇，打乱顺序)
+    raw_domestic = fetch_unread_rss(DOMESTIC_FEEDS, history_urls) 
+    raw_intl = fetch_unread_rss(INTL_FEEDS, history_urls)
     
     final_html = f"<h1>{REPORT_TITLE}</h1>"
     final_html += f"<p><b>生成日期：</b>{today_str}</p><hr>"
     
-    # 👇 国内最多尝试 4 篇，海外最多尝试 3 篇
-    final_html += process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=1, max_evaluate=2)
-    #final_html += process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=1, max_evaluate=1)
+    # 国内尝试10篇，找2篇；海外尝试5篇，找1篇
+    html_dom, success_dom = process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=8, max_evaluate=8)
+    html_intl, success_intl = process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=3, max_evaluate=3)
+    
+    final_html += html_dom
+    final_html += html_intl
+    
+    # 保存今天成功发送的URL到历史文件
+    all_success = success_dom + success_intl
+    if all_success:
+        save_history(all_success)
+        print(f"💾 已将 {len(all_success)} 篇文章保存至历史记录。")
     
     email_subject = f"【每日技术精读】{today_str} - 底层架构知识"
     send_email(email_subject, final_html)

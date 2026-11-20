@@ -246,8 +246,8 @@ if __name__ == "__main__":
     final_html += f"<p><b>生成日期：</b>{today_str}</p><hr>"
     
     # 国内尝试10篇，找2篇；海外尝试5篇，找1篇
-    html_dom, success_dom = process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=8, max_evaluate=8)
-    html_intl, success_intl = process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=3, max_evaluate=3)
+    html_dom, success_dom = process_news_pipeline(raw_domestic, "📌 国内技术深度解析", limit=10, max_evaluate=10)
+    html_intl, success_intl = process_news_pipeline(raw_intl, "🌐 海外硬核架构剖析", limit=5, max_evaluate=5)
     
     final_html += html_dom
     final_html += html_intl
